@@ -34,6 +34,14 @@ public virtual class TriggerHandler {
         }
     }
 
+    public boolean checkTrigger(string triggerName) {
+        return String.isBlank(triggerName) ? false : Trigger__mdt.getInstance(triggerName).Active__c;
+    }
+
+    public boolean checkFeature(string featureName) {
+        return String.isBlank(featureName) ? false : Feature__mdt.getInstance(featureName).Active__c;
+    }
+
     protected virtual void beforeInsert() {}
 
     protected virtual void beforeUpdate() {}
@@ -45,13 +53,5 @@ public virtual class TriggerHandler {
     protected virtual void afterUpdate() {}
 
     protected virtual void afterDelete() {}
-
-    public boolean checkTrigger(string triggerName) {
-        return String.isBlank(triggerName) ? false : Trigger__mdt.getInstance(triggerName).Active__c;
-    }
-
-    public boolean checkFeature(string featureName) {
-        return String.isBlank(featureName) ? false : Feature__mdt.getInstance(featureName).Active__c;
-    }
 
 }
