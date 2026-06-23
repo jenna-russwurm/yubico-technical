@@ -29,10 +29,20 @@ public without sharing class ProvisionKeyQueueable implements Queueable, Databas
         List<API_Key__c> keysToInsert = new List<API_Key__c>();
         List<Integration_Error_Log__c> logsToResolve = new List<Integration_Error_Log__c>();
 
-        // Makes a callout per provisioning request assuming the end-point can only handle one request at a time. 
+        // Pre-query all error logs for retry requests in a single SOQL call to avoid N+1 queries inside the callout loop.
+        Set<Id> errorIds = new Set<Id>();
+        for (ProvisionKeyRequest req : requests) {
+            if (req.errorId != null) errorIds.add(req.errorId);
+        }
+        Map<Id, Integration_Error_Log__c> errorLogCache = errorIds.isEmpty()
+            ? new Map<Id, Integration_Error_Log__c>()
+            : new Map<Id, Integration_Error_Log__c>([SELECT Id FROM Integration_Error_Log__c WHERE Id IN :errorIds]);
+
+        // Makes a callout per provisioning request assuming the end-point can only handle one request at a time.
         // If the end-point can handle multiple requests, this can be optimized to make a single callout with all requests in the chunk.
         for (ProvisionKeyRequest request : requests) {
             ProvisionKeyHandler handler = new ProvisionKeyHandler();
+            handler.cachedErrorLogs = errorLogCache;
             try {
                 // Execute api key provisioning request
                 handler.provisionKey(request.opportunityId, request.errorId);
