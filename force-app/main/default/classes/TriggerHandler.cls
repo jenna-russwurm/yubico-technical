@@ -34,14 +34,18 @@ public virtual class TriggerHandler {
         }
     }
 
-    // Checks the trigger metadata settings to see if the trigger is active. If the trigger name is blank, it returns false.
+    // Checks the trigger metadata settings to see if the trigger is active. If the trigger name is blank or the record does not exist, it returns false.
     public boolean checkTrigger(string triggerName) {
-        return String.isBlank(triggerName) ? false : Trigger__mdt.getInstance(triggerName).Active__c;
+        if (String.isBlank(triggerName)) return false;
+        Trigger__mdt record = Trigger__mdt.getInstance(triggerName);
+        return record != null && record.Active__c;
     }
 
-    // Checks the feature metadata settings to see if the feature is active. If the feature name is blank, it returns false.
+    // Checks the feature metadata settings to see if the feature is active. If the feature name is blank or the record does not exist, it returns false.
     public boolean checkFeature(string featureName) {
-        return String.isBlank(featureName) ? false : Feature__mdt.getInstance(featureName).Active__c;
+        if (String.isBlank(featureName)) return false;
+        Feature__mdt record = Feature__mdt.getInstance(featureName);
+        return record != null && record.Active__c;
     }
 
     protected virtual void beforeInsert() {}
