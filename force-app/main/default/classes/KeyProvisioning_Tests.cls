@@ -1,5 +1,5 @@
 @isTest
-private class OrderProvisioning_Tests {
+private class KeyProvisioning_Tests {
 
     // ── Setup ─────────────────────────────────────────────────────────────────────
 
@@ -44,7 +44,7 @@ private class OrderProvisioning_Tests {
                 res.setBody('{"error":"Missing signature"}');
                 return res;
             }
-            String secret = (String)HMAC_Secret_Keys__mdt.getInstance('Provision_Order').Key__c;
+            String secret = (String)HMAC_Secret_Keys__mdt.getInstance('Provision_Key').Key__c;
             Blob mac = Crypto.generateMac('HMACSHA256', Blob.valueOf(req.getBody()), Blob.valueOf(secret));
             if (EncodingUtil.convertToHex(mac) != signature) {
                 res.setStatusCode(401);
@@ -148,15 +148,15 @@ private class OrderProvisioning_Tests {
         Opportunity opp = buildOpportunity(acc.Id);
         insert opp;
 
-        List<ProvisionOrderQueueable.ProvisionRequest> requests = new List<ProvisionOrderQueueable.ProvisionRequest>{
-            new ProvisionOrderQueueable.ProvisionRequest(opp.Id, null)
+        List<ProvisionKeyRequest> requests = new List<ProvisionKeyRequest>{
+            new ProvisionKeyRequest(opp.Id, null)
         };
 
         // This mock rejects missing or incorrect HMAC signatures with 401.
         // A successful API key creation proves the signature was computed correctly.
         Test.setMock(HttpCalloutMock.class, new MockCalloutValidateHMAC());
         Test.startTest();
-        System.enqueueJob(new ProvisionOrderQueueable(requests));
+        System.enqueueJob(new ProvisionKeyQueueable(requests));
         Test.stopTest();
 
         System.assertEquals(1, [SELECT Id FROM API_Key__c WHERE Opportunity__c = :opp.Id].size(),
@@ -173,13 +173,13 @@ private class OrderProvisioning_Tests {
         Opportunity opp = buildOpportunity(acc.Id);
         insert opp;
 
-        List<ProvisionOrderQueueable.ProvisionRequest> requests = new List<ProvisionOrderQueueable.ProvisionRequest>{
-            new ProvisionOrderQueueable.ProvisionRequest(opp.Id, null)
+        List<ProvisionKeyRequest> requests = new List<ProvisionKeyRequest>{
+            new ProvisionKeyRequest(opp.Id, null)
         };
 
         Test.setMock(HttpCalloutMock.class, new MockCallout(200));
         Test.startTest();
-        System.enqueueJob(new ProvisionOrderQueueable(requests));
+        System.enqueueJob(new ProvisionKeyQueueable(requests));
         Test.stopTest();
 
         List<API_Key__c> keys = [SELECT API_Key__c, Provisioned_Date_Time__c FROM API_Key__c WHERE Opportunity__c = :opp.Id];
@@ -195,23 +195,23 @@ private class OrderProvisioning_Tests {
         Opportunity opp = buildOpportunity(acc.Id);
         insert opp;
 
-        List<ProvisionOrderQueueable.ProvisionRequest> requests = new List<ProvisionOrderQueueable.ProvisionRequest>{
-            new ProvisionOrderQueueable.ProvisionRequest(opp.Id, null)
+        List<ProvisionKeyRequest> requests = new List<ProvisionKeyRequest>{
+            new ProvisionKeyRequest(opp.Id, null)
         };
 
         Test.setMock(HttpCalloutMock.class, new MockCallout(429));
         Test.startTest();
-        System.enqueueJob(new ProvisionOrderQueueable(requests));
+        System.enqueueJob(new ProvisionKeyQueueable(requests));
         Test.stopTest();
 
         List<Integration_Error_Log__c> logs = [SELECT Retry_Eligible__c, High_Priority__c, Resolved__c, Request_Body__c, Status_Code__c FROM Integration_Error_Log__c];
         System.assertEquals(1, logs.size(), 'One error log should be created for 429');
         System.assertEquals(true, logs[0].Retry_Eligible__c, 'Log should be retry eligible');
-        System.assertEquals(true, logs[0].High_Priority__c, 'Log should be high priority');
+        System.assertEquals(false, logs[0].High_Priority__c, 'Retryable errors should not be high priority on creation');
         System.assertEquals(false, logs[0].Resolved__c, 'Log should be unresolved');
         System.assertEquals(429, (Integer)logs[0].Status_Code__c, 'Status code should be recorded');
 
-        ProvisionOrderRequest retryReq = (ProvisionOrderRequest)JSON.deserialize(logs[0].Request_Body__c, ProvisionOrderRequest.class);
+        ProvisionKeyRequest retryReq = (ProvisionKeyRequest)JSON.deserialize(logs[0].Request_Body__c, ProvisionKeyRequest.class);
         System.assertEquals(opp.Id, retryReq.opportunityId, 'Request_Body__c should contain the Opportunity ID for retry deserialization');
     }
 
@@ -221,13 +221,13 @@ private class OrderProvisioning_Tests {
         Opportunity opp = buildOpportunity(acc.Id);
         insert opp;
 
-        List<ProvisionOrderQueueable.ProvisionRequest> requests = new List<ProvisionOrderQueueable.ProvisionRequest>{
-            new ProvisionOrderQueueable.ProvisionRequest(opp.Id, null)
+        List<ProvisionKeyRequest> requests = new List<ProvisionKeyRequest>{
+            new ProvisionKeyRequest(opp.Id, null)
         };
 
         Test.setMock(HttpCalloutMock.class, new MockCallout(503));
         Test.startTest();
-        System.enqueueJob(new ProvisionOrderQueueable(requests));
+        System.enqueueJob(new ProvisionKeyQueueable(requests));
         Test.stopTest();
 
         List<Integration_Error_Log__c> logs = [SELECT Retry_Eligible__c, Status_Code__c FROM Integration_Error_Log__c];
@@ -242,13 +242,13 @@ private class OrderProvisioning_Tests {
         Opportunity opp = buildOpportunity(acc.Id);
         insert opp;
 
-        List<ProvisionOrderQueueable.ProvisionRequest> requests = new List<ProvisionOrderQueueable.ProvisionRequest>{
-            new ProvisionOrderQueueable.ProvisionRequest(opp.Id, null)
+        List<ProvisionKeyRequest> requests = new List<ProvisionKeyRequest>{
+            new ProvisionKeyRequest(opp.Id, null)
         };
 
         Test.setMock(HttpCalloutMock.class, new MockCallout(500));
         Test.startTest();
-        System.enqueueJob(new ProvisionOrderQueueable(requests));
+        System.enqueueJob(new ProvisionKeyQueueable(requests));
         Test.stopTest();
 
         List<Integration_Error_Log__c> logs = [SELECT Retry_Eligible__c, High_Priority__c, Status_Code__c FROM Integration_Error_Log__c];
@@ -267,9 +267,9 @@ private class OrderProvisioning_Tests {
         insert opp;
 
         Integration_Error_Log__c errorLog = new Integration_Error_Log__c(
-            Type__c          = 'Provision_Order',
+            Type__c          = 'Provision_Key',
             Error_Message__c = 'Too Many Requests',
-            Request_Body__c  = JSON.serialize(new ProvisionOrderRequest(opp.Id)),
+            Request_Body__c  = JSON.serialize(new ProvisionKeyRequest(opp.Id)),
             Retry_Eligible__c = true,
             Resolved__c       = false,
             Retry_Attempts__c = 0,
@@ -296,8 +296,8 @@ private class OrderProvisioning_Tests {
         insert opp;
 
         insert new Integration_Error_Log__c(
-            Type__c           = 'Provision_Order',
-            Request_Body__c   = JSON.serialize(new ProvisionOrderRequest(opp.Id)),
+            Type__c           = 'Provision_Key',
+            Request_Body__c   = JSON.serialize(new ProvisionKeyRequest(opp.Id)),
             Retry_Eligible__c = true,
             Resolved__c       = false,
             Retry_Attempts__c = 3
@@ -319,8 +319,8 @@ private class OrderProvisioning_Tests {
         insert opp;
 
         insert new Integration_Error_Log__c(
-            Type__c           = 'Provision_Order',
-            Request_Body__c   = JSON.serialize(new ProvisionOrderRequest(opp.Id)),
+            Type__c           = 'Provision_Key',
+            Request_Body__c   = JSON.serialize(new ProvisionKeyRequest(opp.Id)),
             Retry_Eligible__c = true,
             Resolved__c       = true,
             Retry_Attempts__c = 1
@@ -348,14 +348,14 @@ private class OrderProvisioning_Tests {
         }
         insert opps;
 
-        List<ProvisionOrderQueueable.ProvisionRequest> requests = new List<ProvisionOrderQueueable.ProvisionRequest>();
+        List<ProvisionKeyRequest> requests = new List<ProvisionKeyRequest>();
         for (Opportunity o : opps) {
-            requests.add(new ProvisionOrderQueueable.ProvisionRequest(o.Id, null));
+            requests.add(new ProvisionKeyRequest(o.Id, null));
         }
 
         Test.setMock(HttpCalloutMock.class, new MockCallout(200));
         Test.startTest();
-        System.enqueueJob(new ProvisionOrderQueueable(requests));
+        System.enqueueJob(new ProvisionKeyQueueable(requests));
         Test.stopTest();
 
         System.assertEquals(5, [SELECT Id FROM API_Key__c].size(), 'All 5 requests should be provisioned in a single chunk');
@@ -400,8 +400,8 @@ private class OrderProvisioning_Tests {
 
         // Platform events are not delivered synchronously in unit tests, so we invoke
         // the queueable directly to simulate what ProvisioningEventTriggerHandler would do.
-        System.enqueueJob(new ProvisionOrderQueueable(new List<ProvisionOrderQueueable.ProvisionRequest>{
-            new ProvisionOrderQueueable.ProvisionRequest(opp.Id, null)
+        System.enqueueJob(new ProvisionKeyQueueable(new List<ProvisionKeyRequest>{
+            new ProvisionKeyRequest(opp.Id, null)
         }));
 
         Test.stopTest();

@@ -1,3 +1,3 @@
-trigger opportunity on Opportunity (after update) {
+trigger Opportunity on Opportunity (after update) {
     new OpportunityTriggerHandler().run();
 }

@@ -34,10 +34,12 @@ public virtual class TriggerHandler {
         }
     }
 
+    // Checks the trigger metadata settings to see if the trigger is active. If the trigger name is blank, it returns false.
     public boolean checkTrigger(string triggerName) {
         return String.isBlank(triggerName) ? false : Trigger__mdt.getInstance(triggerName).Active__c;
     }
 
+    // Checks the feature metadata settings to see if the feature is active. If the feature name is blank, it returns false.
     public boolean checkFeature(string featureName) {
         return String.isBlank(featureName) ? false : Feature__mdt.getInstance(featureName).Active__c;
     }

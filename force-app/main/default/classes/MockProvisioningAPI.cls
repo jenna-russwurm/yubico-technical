@@ -1,4 +1,8 @@
 @RestResource(urlMapping='/mock-provisioning/issue-api-key')
+
+// Mock Provisioning API for testing the ProvisionKeyHandler and ProvisionKeyQueueable classes.
+// This mock API simulates the behavior of the real provisioning API, including HMAC signature verification, 
+// random retryable errors (429 Too Many Requests, 503 Service Unavailable), and successful responses with a mock API key.
 global class MockProvisioningAPI {
 
     @HttpPost
@@ -13,7 +17,7 @@ global class MockProvisioningAPI {
             return;
         }
 
-        String secret = (String)HMAC_Secret_Keys__mdt.getInstance('Provision_Order').Key__c;
+        String secret = (String)HMAC_Secret_Keys__mdt.getInstance('Provision_Key').Key__c;
         String body = req.requestBody.toString();
         Blob expectedMac = Crypto.generateMac('HMACSHA256', Blob.valueOf(body), Blob.valueOf(secret));
         String expectedSignature = EncodingUtil.convertToHex(expectedMac);

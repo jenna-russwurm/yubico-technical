@@ -1,5 +1,9 @@
+/*  Script to flip the generated set of seed opportunities for testing purposes. 
+    This script moves all opportunities in the "Prospecting" stage to the "Closed Won" stage.
+*/
+
 List<Opportunity> opps = [
-    SELECT Id, StageName
+    SELECT StageName
     FROM Opportunity
     WHERE Name LIKE 'Seed Opportunity %'
     AND StageName = 'Prospecting'
@@ -14,6 +18,6 @@ if (opps.isEmpty()) {
 for (Opportunity opp : opps) {
     opp.StageName = 'Closed Won';
 }
-update opps;
+database.update(opps);
 
 System.debug('Moved ' + opps.size() + ' opportunities to Closed Won.');

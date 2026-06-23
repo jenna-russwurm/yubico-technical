@@ -1,18 +1,193 @@
-# Salesforce DX Project: Next Steps
+<div align="center">
 
-Now that you’ve created a Salesforce DX project, what’s next? Here are some documentation resources to get you started.
+# Yubico — Secure Order Provisioning Engine
 
-## How Do You Plan to Deploy Your Changes?
+**Salesforce Technical Assignment &nbsp;·&nbsp; Jenna Russwurm &nbsp;·&nbsp; 2026**
 
-Do you want to deploy a set of changes, or create a self-contained application? Choose a [development model](https://developer.salesforce.com/tools/vscode/en/user-guide/development-models).
+*An event-driven, bulk-safe provisioning system that issues API keys and tracks license inventory when an Opportunity is Closed Won. Built with platform events, asynchronous Queueable Apex, HMAC-SHA256 request signing, and an automated retry scheduler.*
 
-## Configure Your Salesforce DX Project
+</div>
 
-The `sfdx-project.json` file contains useful configuration information for your project. See [Salesforce DX Project Configuration](https://developer.salesforce.com/docs/atlas.en-us.sfdx_dev.meta/sfdx_dev/sfdx_dev_ws_config.htm) in the _Salesforce DX Developer Guide_ for details about this file.
+---
 
-## Read All About It
+## Architecture Overview
 
-- [Salesforce Extensions Documentation](https://developer.salesforce.com/tools/vscode/)
-- [Salesforce CLI Setup Guide](https://developer.salesforce.com/docs/atlas.en-us.sfdx_setup.meta/sfdx_setup/sfdx_setup_intro.htm)
-- [Salesforce DX Developer Guide](https://developer.salesforce.com/docs/atlas.en-us.sfdx_dev.meta/sfdx_dev/sfdx_dev_intro.htm)
-- [Salesforce CLI Command Reference](https://developer.salesforce.com/docs/atlas.en-us.sfdx_cli_reference.meta/sfdx_cli_reference/cli_reference.htm)
+```
+Opportunity (Closed Won)
+    │
+    ├── publishes ──► Provisioning_Event__e (2,000 records/batch, Automated Process user)
+    │                       │
+    │                       └── ProvisioningEvent trigger
+    │                               └── ProvisioningEventTriggerHandler
+    │                                       └── ProvisionKeyQueueable.enqueueChunked()
+    │                                               └── ProvisionKeyHandler ──► Mock Provisioning API
+    │                                                       └── ServiceHandler (HMAC-SHA256 signing)
+    │
+    └── aggregate SOQL rollup ──► Account.Active_Licenses_Count__c
+```
+
+**Retry path:**
+```
+Integration_Error_Log__c (Retry_Eligible__c = true)
+    └── ProvisioningRetryScheduler (every 15 min)
+            └── ProvisionKeyQueueable.enqueueChunked()
+```
+
+---
+
+## Custom Metadata Types
+
+Three custom metadata types drive the system's configuration and feature gating:
+
+| Metadata Type | Purpose |
+|---|---|
+| `Trigger__mdt` | Controls enablement of triggers. Parent to Feature records. Acts as a kill switch at the trigger level. |
+| `Feature__mdt` | Controls enablement of individual processes within a trigger. Allows selective disablement without touching code. |
+| `HMAC_Secret_Keys__mdt` | Stores the HMAC secret keys used to generate the `X-Secure-Signature` header. Stored in metadata — not hardcoded — because Named Credential protected fields are not accessible in Apex at runtime. |
+
+---
+
+## Task 1 — Event-Driven Trigger & Account Rollup
+
+**Trigger:** `Opportunity.trigger` → `OpportunityTriggerHandler`
+
+- Fires on `after update`, filters only Closed Won transitions
+- Publishes `Provisioning_Event__e` via `EventBus.publish()` — no synchronous callouts
+- Feature-gated via `Trigger__mdt` / `Feature__mdt` — full kill switch available at both trigger and feature level
+
+**Rollup:** `Active_Licenses_Count__c` on Account
+
+- Aggregate SOQL (`SUM(Quantity)`) grouped by `AccountId`
+- Bulk-safe: operates only on affected account IDs, single DML update — no record locking under 200+ records
+- Feature-gated via `Rollup_Active_Account_Licenses`
+
+> [!NOTE]
+> **Assumption — Active Line Items:** An opportunity may contain a mix of license types as `OpportunityLineItem` records. "Active line items" are defined as those attached to a Closed Won Opportunity where `Start_Date__c <= TODAY` and `End_Date__c >= TODAY`. This accurately reflects currently active license coverage rather than counting all historical closed deals.
+
+---
+
+## Task 2 — Secure Callout & Retry
+
+**Subscriber:** `ProvisioningEvent.trigger` → `ProvisioningEventTriggerHandler` → `ProvisionKeyQueueable`
+
+**One API key per Opportunity** — when a deal is Closed Won, one provisioning request is made for the order regardless of how many line items it contains.
+
+**Request signing (`ServiceHandler`):**
+- HMAC-SHA256 signature computed via `Crypto.generateMac()`
+- Secret key read from `HMAC_Secret_Keys__mdt` at runtime — never hardcoded
+- A Named Credential stores the endpoint; `HMAC_Secret_Keys__mdt` stores the signing key, as Named Credential protected fields are not accessible in Apex
+- Injected as `X-Secure-Signature` request header on every outbound request
+
+**Mock endpoint:** A Salesforce Site was used to host `MockProvisioningAPI` as a publicly accessible REST endpoint, simulating real provisioning API behaviour including HMAC verification and randomised 429/503 responses.
+
+**Failure handling:**
+
+| Response | Behaviour |
+|---|---|
+| `200` | Inserts `API_Key__c`, marks error log resolved (if retry) |
+| `429` / `503` | Creates `Integration_Error_Log__c` with `Retry_Eligible__c = true`, `High_Priority__c = false` |
+| Other `4xx` / `5xx` | Creates non-retryable `High_Priority__c` error log requiring manual review |
+
+**Retry scheduler (`ProvisioningRetryScheduler`):**
+- Runs at `:00`, `:15`, `:30`, `:45` every hour
+- A scheduled retry was chosen over immediate re-enqueue — 429 and 503 errors indicate the external system needs time to recover, so retrying immediately increases the chance of repeated failure
+- Re-enqueues eligible errors with `Retry_Attempts__c < 3`; increments attempt count on each run
+- On the 3rd (final) attempt, `High_Priority__c` is set to `true` — if the attempt fails, the log is already flagged for manual review
+
+> [!TIP]
+> `ServiceHandler` is built as a reusable base class. In a real implementation it could be extended to standardise callout behaviour and integration error logging across multiple integrations.
+
+---
+
+## Task 3 — Asynchronous Guardrails & Scalability
+
+**Chunking (`ProvisionKeyQueueable`):**
+- `CHUNK_SIZE = 90` — stays safely under the 100-callout-per-transaction governor limit while leaving padding before the ceiling
+- `enqueueChunked()` static helper fans out parallel jobs — one per chunk
+- Both `ProvisioningEventTriggerHandler` and `ProvisioningRetryScheduler` use `enqueueChunked()` as the single entry point
+- `Provisioning_Event__e` is configured to process **2,000 records per batch**, running as the **Automated Process** user. At `CHUNK_SIZE = 90`, a full 2,000-record batch generates ~23 enqueued jobs — well under the 50 concurrent Queueable job limit
+
+<details>
+<summary><strong>Architectural Decision: Why Queueable?</strong></summary>
+
+<br>
+
+**vs. Batch Apex:** Batch is optimised for large-scale data processing with SOQL-driven scoping. This integration is callout-heavy, not query-heavy. Batch jobs can make callouts, but they operate in fixed `execute()` windows that introduce unnecessary latency. Queueable fires immediately on event receipt, which is the right model for near-real-time provisioning.
+
+**vs. Change Data Capture (CDC):** CDC surfaces record changes to external subscribers (e.g., event buses outside Salesforce). It does not replace the need for an internal async processor and would add infrastructure complexity without benefit here.
+
+**Chunking strategy:** Each Queueable job receives a pre-sized chunk of ≤90 requests. Jobs run in parallel — chunk 2 does not wait for chunk 1. This maximises throughput on high-volume spikes (e.g., 1,000 simultaneous Closed Won deals) while respecting per-transaction callout and heap limits.
+
+</details>
+
+---
+
+## Project Structure
+
+```
+force-app/main/default/
+├── triggers/
+│   ├── Opportunity.trigger                   # Closed Won → publish event + rollup
+│   └── ProvisioningEvent.trigger             # Platform event subscriber
+├── classes/
+│   ├── TriggerHandler.cls                    # Base handler — checkTrigger() + checkFeature() kill switches
+│   ├── OpportunityTriggerHandler.cls         # Event publish + account rollup
+│   ├── ProvisioningEventTriggerHandler.cls   # Builds requests + calls enqueueChunked()
+│   ├── ProvisionKeyQueueable.cls             # Chunked async processor (CHUNK_SIZE = 90)
+│   ├── ProvisionKeyHandler.cls               # Per-request orchestration + success/error handling
+│   ├── ProvisionKeyRequest.cls               # Request payload (opportunityId + errorId)
+│   ├── ServiceHandler.cls                    # Reusable HTTP client + HMAC signing + error logging
+│   ├── ProvisioningRetryScheduler.cls        # Scheduled retry job (every 15 min)
+│   ├── MockProvisioningAPI.cls               # Salesforce Site-hosted mock endpoint (validates HMAC)
+│   └── KeyProvisioning_Tests.cls             # Full test suite
+scripts/apex/
+├── seedOpportunities_create.apex             # Creates 1,000 seed Opportunities in Prospecting
+└── seedOpportunities_closeWon.apex           # Flips seed Opportunities to Closed Won
+```
+
+---
+
+## Setup
+
+**1. Deploy metadata**
+```bash
+sf project deploy start --source-dir force-app
+```
+
+**2. Configure the HMAC secret**
+
+Create a `HMAC_Secret_Keys__mdt` record named `Provision_Key` with your secret key value. This is read at runtime by `ServiceHandler` — nothing is hardcoded.
+
+**3. Schedule the retry job**
+```apex
+ProvisioningRetryScheduler.scheduleRetry();
+```
+
+**4. Run tests**
+```bash
+sf apex run test --test-level RunLocalTests --code-coverage
+```
+
+---
+
+## Load Test
+
+To simulate a high-volume provisioning spike end-to-end:
+
+**Step 1 — Seed 1,000 Opportunities**
+```bash
+sf apex run --file scripts/apex/seedOpportunities_create.apex
+```
+Creates 1,000 Opportunities in `Prospecting` stage, each with a random quantity of YubiEnterprise Subscription line items from the Standard Licenses pricebook.
+
+**Step 2 — Flip to Closed Won**
+```bash
+sf apex run --file scripts/apex/seedOpportunities_closeWon.apex
+```
+Moves all seeded Opportunities to `Closed Won`, triggering the platform event publish and firing the full provisioning pipeline.
+
+**Step 3 — Review results**
+
+Open the org and navigate to the **Business Operations** tab to review:
+- **Integration Error Logs** — any failed provisioning requests, retry status, and high-priority flags
+- **Generated API Keys** — successfully provisioned `API_Key__c` records linked to their Opportunities
