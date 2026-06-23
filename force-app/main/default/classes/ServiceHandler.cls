@@ -7,6 +7,8 @@ public virtual class ServiceHandler {
     // have completed. Doing DML between callouts causes "uncommitted work
     // pending" on the next callout.
     public List<Integration_Error_Log__c> errorLogs = new List<Integration_Error_Log__c>();
+    // Pre-populated by ProvisionKeyQueueable before the callout loop to avoid N+1 SOQL queries on retry paths.
+    public Map<Id, Integration_Error_Log__c> cachedErrorLogs = new Map<Id, Integration_Error_Log__c>();
 
     public ServiceHandler(string serviceType) {
         this.serviceType = serviceType;
@@ -79,6 +81,7 @@ public virtual class ServiceHandler {
     }
 
     public Integration_Error_Log__c getErrorLog(Id errorId) {
+        if (cachedErrorLogs.containsKey(errorId)) return cachedErrorLogs.get(errorId);
         return [SELECT Id FROM Integration_Error_Log__c WHERE Id = :errorId];
     }
 
