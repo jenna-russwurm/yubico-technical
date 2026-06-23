@@ -32,6 +32,7 @@ public with sharing class ProvisioningRetryScheduler implements Schedulable {
         return [SELECT Request_Body__c, Retry_Attempts__c, High_Priority__c FROM Integration_Error_Log__c
                 WHERE Retry_Eligible__c = true AND Resolved__c = false
                 AND Type__c = 'Provision_Key' AND Retry_Attempts__c < 3
-                ORDER BY CreatedDate ASC];
+                ORDER BY CreatedDate ASC
+                LIMIT 2000];
     }
 }
