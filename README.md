@@ -114,11 +114,11 @@ Three custom metadata types drive the system's configuration and feature gating:
 
 <br>
 
-**vs. Batch Apex:** Batch is optimised for large-scale data processing with SOQL-driven scoping. This integration is callout-heavy, not query-heavy. Batch jobs can make callouts, but they operate in fixed `execute()` windows that introduce unnecessary latency. Queueable fires immediately on event receipt, which is the right model for near-real-time provisioning.
+**vs. Batch Apex:** Batch is built for heavy data processing, scanning millions of records via SOQL. That's not what this integration does. It's callout-heavy, not query-heavy, and Batch's fixed `execute()` windows add unnecessary latency. Queueable fires the moment an event arrives, which is exactly what near-real-time provisioning needs.
 
-**vs. Change Data Capture (CDC):** CDC surfaces record changes to external subscribers (e.g., event buses outside Salesforce). It does not replace the need for an internal async processor and would add infrastructure complexity without benefit here.
+**vs. Change Data Capture (CDC):** CDC is designed to stream record changes to external subscribers outside Salesforce. It doesn't replace the need for an internal async processor, so adding it here would just mean more infrastructure for no real benefit.
 
-**Chunking strategy:** Each Queueable job receives a pre-sized chunk of ≤90 requests. Jobs run in parallel — chunk 2 does not wait for chunk 1. This maximises throughput on high-volume spikes (e.g., 1,000 simultaneous Closed Won deals) while respecting per-transaction callout and heap limits.
+**Chunking:** Each Queueable job handles a pre-sized chunk of up to 90 requests. Chunks run in parallel, so chunk 2 doesn't wait on chunk 1. On high-volume spikes (e.g., 1,000 Closed Won deals at once), this keeps throughput high while staying within per-transaction callout and heap limits.
 
 </details>
 
