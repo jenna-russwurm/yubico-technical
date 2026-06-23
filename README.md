@@ -21,7 +21,7 @@ Opportunity (Closed Won)
     │                       │
     │                       └── ProvisioningEvent trigger
     │                               └── ProvisioningEventTriggerHandler
-    │                                       └── ProvisionKeyQueueable.enqueueChunked()
+    │                                       └── ProvisionKeyQueueable
     │                                               └── ProvisionKeyHandler ──► Mock Provisioning API
     │                                                       └── ServiceHandler (HMAC-SHA256 signing)
     │
@@ -32,7 +32,7 @@ Opportunity (Closed Won)
 ```
 Integration_Error_Log__c (Retry_Eligible__c = true)
     └── ProvisioningRetryScheduler (every 15 min)
-            └── ProvisionKeyQueueable.enqueueChunked()
+            └── ProvisionKeyQueueable
 ```
 
 ---
@@ -145,29 +145,6 @@ force-app/main/default/
 scripts/apex/
 ├── seedOpportunities_create.apex             # Creates 1,000 seed Opportunities in Prospecting
 └── seedOpportunities_closeWon.apex           # Flips seed Opportunities to Closed Won
-```
-
----
-
-## Setup
-
-**1. Deploy metadata**
-```bash
-sf project deploy start --source-dir force-app
-```
-
-**2. Configure the HMAC secret**
-
-Create a `HMAC_Secret_Keys__mdt` record named `Provision_Key` with your secret key value. This is read at runtime by `ServiceHandler` — nothing is hardcoded.
-
-**3. Schedule the retry job**
-```apex
-ProvisioningRetryScheduler.scheduleRetry();
-```
-
-**4. Run tests**
-```bash
-sf apex run test --test-level RunLocalTests --code-coverage
 ```
 
 ---
